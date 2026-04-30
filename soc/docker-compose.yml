@@ -1,0 +1,47 @@
+version: "3.9"
+
+services:
+
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki-config.yml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - soc-net
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: promtail
+    volumes:
+      - ../app/logs:/var/log/nginx:ro
+      - ./promtail-config.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - soc-net
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=securelab
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - soc-net
+    depends_on:
+      - loki
+
+volumes:
+  grafana-data:
+
+networks:
+  soc-net:
+    driver: bridge
