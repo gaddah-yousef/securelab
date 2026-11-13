@@ -1,0 +1,22 @@
+// Grafana Alloy: reads only Nginx logs shared through a named volume.
+// No Docker socket mount and no host telemetry.
+local.file_match "nginx" {
+  path_targets = [
+    {
+      "__path__" = "/var/log/securelab/access.log",
+      "job"      = "nginx",
+      "service"  = "securelab-proxy",
+    },
+  ]
+}
+
+loki.source.file "nginx" {
+  targets    = local.file_match.nginx.targets
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
