@@ -1,2 +1,9 @@
-logs/
+# Local secrets and transient data
 .env
+.env.*
+!.env.example
+logs/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.log
