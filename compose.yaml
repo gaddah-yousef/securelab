@@ -12,7 +12,8 @@ services:
     restart: unless-stopped
 
   nginx-proxy:
-    image: nginx:1.28-alpine
+    build: ./app
+    image: securelab-nginx:local
     depends_on:
       - dvwa
     ports:
