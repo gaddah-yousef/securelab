@@ -1,32 +1,4 @@
-version: "3.9"
-
-services:
-
-  dvwa:
-    image: vulnerables/web-dvwa
-    container_name: dvwa
-    environment:
-      - MYSQL_ROOT_PASSWORD=dvwa
-    ports:
-      - "8080:80"
-    networks:
-      - securelab-net
-    restart: unless-stopped
-
-  nginx-proxy:
-    image: nginx:alpine
-    container_name: nginx-proxy
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./logs:/var/log/nginx
-    ports:
-      - "80:80"
-    depends_on:
-      - dvwa
-    networks:
-      - securelab-net
-    restart: unless-stopped
-
-networks:
-  securelab-net:
-    driver: bridge
+# Compatibility entry point. The supported lab configuration is ../compose.yaml.
+# Docker Compose v2.20+ supports include. Prefer: docker compose -f compose.yaml up -d
+include:
+  - ../compose.yaml
