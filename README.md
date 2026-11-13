@@ -1,143 +1,150 @@
-# SecureLab — Web Security Telemetry & DevSecOps Lab
+# SecureLab — Isolated Web Security & SOC Observability Lab
 
-**SecureLab** is a small, container-based teaching environment designed to connect **application traffic**, **reverse-proxy logs**, **centralized observability** and **CI security checks**. It is a portfolio experiment that demonstrates the relationship between preventive application-security controls and security monitoring.
+**SecureLab** is a containerized educational laboratory for studying the link between application events, centralized logs, SOC investigations and secure CI/CD controls.
 
-> **Status: experimental / incomplete integration.** The repository contains two separate Compose projects, an Nginx configuration, Loki/Promtail/Grafana definitions and a sample post-incident report. The pipeline and monitoring configuration require validation and corrections before this can be described as an operational, end-to-end SOC deployment.
+> **Safety:** this lab includes **DVWA, an intentionally vulnerable application**. The supported Docker Compose configuration binds its published interfaces to **127.0.0.1 only** and does not expose DVWA directly. Use it on a dedicated development machine or isolated VM; never publish ports to the Internet. A configuration review is not proof of a successfully tested deployment.
 
-## Why this project?
-
-Application security has two complementary dimensions:
-1. **Build-time:** identify risky code, leaked secrets and vulnerable dependencies or images.
-2. **Runtime:** monitor HTTP events, understand suspicious patterns, investigate and document incidents.
-
-SecureLab explores both with a deliberately vulnerable training application and an observable reverse proxy. This is **not designed for exposure on a public server**.
-
-## System architecture
+## 1. Scope and architecture
 
 ```mermaid
 flowchart LR
-  Analyst[Lab user] --> Proxy[Nginx reverse proxy]
-  Proxy --> DVWA[DVWA - vulnerable web application]
-  Proxy --> Logs[Nginx access/error logs]
-  Logs --> Promtail[Promtail]
-  Promtail --> Loki[Loki]
-  Loki --> Grafana[Grafana dashboards]
-  Source[Repository changes] --> CI[GitHub Actions]
-  CI --> Secrets[Gitleaks]
+  Browser[Authorized browser localhost:8080] --> Nginx[Nginx reverse proxy]
+  Nginx --> DVWA[DVWA vulnerable test application]
+  Nginx --> Volume[Shared Nginx log volume]
+  Volume --> Alloy[Grafana Alloy]
+  Alloy --> Loki[Loki 3.x]
+  Loki --> Grafana[Grafana localhost:3000]
+  Source[Repository] --> CI[GitHub Actions]
   CI --> SAST[Semgrep]
-  CI --> ImageScan[Trivy]
+  CI --> Secrets[Gitleaks]
+  CI --> Scan[Trivy]
 ```
 
-The diagram illustrates the **intended** log path. Note that the two Compose projects use separate Docker networks. In their current form, the application and SOC stacks **do not share an explicit external network**, so additional network configuration is required for dependable end-to-end connectivity. The Nginx proxy configuration also requires review before use.
+The app-side Docker network is **internal**. Loki/Alloy/Grafana use a **separate internal monitoring network**. Alloy reads an explicitly mounted Nginx log volume, rather than using the Docker socket or observing the host.
 
-## Repository structure
+## 2. Stack components
+
+| Component | Purpose | Notes |
+| --- | --- | --- |
+| DVWA | Deliberately vulnerable testing target | **No host port**, accessible only via Nginx |
+| Nginx | Reverse proxy and request log collection | Local port `127.0.0.1:8080` |
+| Grafana Alloy | Supported file-log collector | Replaces end-of-life Promtail |
+| Loki | Centralized log storage / LogQL queries | Internal port 3100 |
+| Grafana | Visualization and log investigation | Local port `127.0.0.1:3000` |
+| GitHub Actions | DevSecOps safeguards | Gitleaks, Semgrep, Nginx check, Trivy |
+
+As of March 2026, Promtail is no longer maintained; the **supported entry point uses Alloy**. The old `soc/promtail-config.yml` remains only as a historical artifact and is not loaded by the main stack.
+
+## 3. Layout
 
 ```text
 .
-├── .github/workflows/security-pipeline.yml
+├── compose.yaml                 # Supported unified deployment
+├── .env.example                 # Password variable names; copy to .env
 ├── app/
-│   ├── Dockerfile
-│   ├── docker-compose.yml      # DVWA + Nginx
-│   └── nginx.conf              # Nginx HTTP access/error logs
+│   ├── nginx.conf              # Corrected upstream proxy configuration and log paths
+│   ├── Dockerfile              # CI smoke-test image
+│   └── docker-compose.yml      # Legacy wrapper for root stack
 ├── soc/
-│   ├── docker-compose.yml      # Loki + Promtail + Grafana
-│   ├── loki-config.yml
-│   └── promtail-config.yml
-├── docs/postmortem-01.md       # Example brute-force incident narrative
-└── README.md
+│   ├── config.alloy            # Alloy reads Nginx access log volume
+│   ├── loki-config.yml         # TSDB schema for modern Loki
+│   ├── grafana/provisioning/datasources/loki.yml
+│   └── docker-compose.yml      # Legacy wrapper for root stack
+├── docs/postmortem-01.md       # Example incident investigation
+└── .github/workflows/security-pipeline.yml
 ```
 
-## Components and responsibilities
+## 4. Start safely
 
-| Component | Purpose | Scope |
-|---|---|---|
-| DVWA | Intentionally vulnerable web application | Authorized offline lab only |
-| Nginx | Reverse proxy and structured HTTP event source | Access/error log generation |
-| Promtail | Reads Nginx access logs | Log shipping to Loki |
-| Loki | Stores searchable application logs | Observability backend |
-| Grafana | Query and visualize telemetry | Human investigation |
-| GitHub Actions | Runs development-stage security checks | CI workflow |
-
-The current Nginx configuration includes a nonstandard proxy header directive that should be corrected and tested before deployment. The Compose file also publishes DVWA directly on host port 8080, bypassing Nginx. Use local binding or an isolated VM rather than running the current setup on an accessible server.
-
-## How to inspect and validate
-
-**Prerequisites:** Docker and Docker Compose v2 on an isolated machine, basic Nginx knowledge.
+**Requirements:** Docker Engine + **Docker Compose v2**, an available loopback port 8080 and 3000, at least 4 GiB free memory recommended.
 
 ```bash
 git clone https://github.com/gaddah-yousef/securelab.git
 cd securelab
-
-# Static syntax/configuration checks before startup:
-docker compose -f app/docker-compose.yml config
-docker compose -f soc/docker-compose.yml config
-
-# Review exposed ports, networks and hardcoded credentials:
-cat app/nginx.conf
-cat soc/promtail-config.yml
+cp .env.example .env
+# Edit .env and replace DVWA_DB_PASSWORD and GRAFANA_ADMIN_PASSWORD
+docker compose --env-file .env config
+docker compose --env-file .env up -d
+docker compose ps
 ```
 
-**Do not run both stacks on an Internet-facing host without remediating the listed issues.** The current Grafana configuration includes an example admin password; replace it with a unique secret before any launch.
+Visit:
+- **Application (DVWA via Nginx):** <http://127.0.0.1:8080>
+- **Grafana:** <http://127.0.0.1:3000> (user `admin`, password from `.env`)
 
-### Demonstration outline (after environment corrections)
+The first start may require extra time for container downloads and DVWA initialization. Do not rely on the sample password strings from `.env.example`. Set **unique local passwords** before starting.
 
-1. Bring up the web application and reverse proxy on an isolated network.
-2. Confirm Nginx forwards requests correctly to the test application.
-3. Verify that access logs appear in the mounted log directory.
-4. Bring up Promtail, Loki and Grafana with verified shared connectivity.
-5. Simulate **authorized** requests and search matching events in Grafana.
-6. Record timestamp, source IP (lab network), method, URL, response status and disposition.
-7. Document observed evidence, hypotheses and limitations.
+### Verify service and logs
 
-Example Loki query (provided only as a starting point):
+```bash
+# Parse the Compose file and inspect container health:
+docker compose --env-file .env config
+docker compose ps
+
+# Generate benign HTTP events on the local lab:
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/login.php
+
+# Inspect log collection and shipping:
+docker compose logs --tail=50 nginx-proxy
+docker compose logs --tail=50 alloy
+docker compose logs --tail=50 loki
+```
+
+In Grafana, open **Explore → Loki** and run:
 
 ```logql
-{job="nginx"} |= "POST"
+{job="nginx"}
 ```
 
-A burst of requests alone does not establish credential compromise; validate against application behavior and supporting logs.
+Filter HTTP request records:
 
-## CI/CD security controls
+```logql
+{job="nginx"} |= "GET"
+```
 
-The workflow [`security-pipeline.yml`](.github/workflows/security-pipeline.yml) defines:
-- **Gitleaks** for detecting committed secrets.
-- **Semgrep** for static analysis against OWASP and Docker-oriented rules.
-- **Trivy** for HIGH/CRITICAL container vulnerability findings.
+If logs are absent, verify that Nginx writes `/var/log/securelab/access.log` and Alloy reads the shared volume; startup alone is **not** proof of a functioning detection pipeline.
 
-**Known integration concern:** the image-scan job builds a Dockerfile under `app/` that copies `nginx.conf`, but the current Dockerfile/working-directory assumptions should be verified on CI. A passing CI configuration is **not established** by this README alone.
+### Shut down
 
-## Incident response documentation
+```bash
+docker compose down
+# Destructive only if you wish to remove all lab log/dashboard data:
+# docker compose down -v
+```
 
-The [sample postmortem](docs/postmortem-01.md) describes a simulated login brute-force burst, evidence in logs and proposed mitigations such as rate limiting and MFA. It is an **educational incident narrative**, not independently verified evidence of a live attack.
+## 5. Security controls and known limitations
 
-An analyst should capture:
-- attack hypothesis and indicators;
-- supporting timestamps/log lines;
-- affected service and potential impact;
-- containment or tuning actions;
-- criteria used to close the investigation.
+- Web access is bound to localhost. Do not alter the address to `0.0.0.0` for a vulnerable application.
+- DVWA has no independently exposed host port and is isolated from Loki's network.
+- Secrets are provided through local `.env` variables, not checked into Git.
+- Loki runs with authentication disabled **inside an isolated private Docker network**; do not expose it.
+- Grafana is reachable on localhost only.
+- The test scenario provides telemetry for investigation but **no validated automatic alerting, incident response or brute-force blocking**.
+- The project does **not** claim production readiness or end-to-end runtime verification.
 
-## Known limitations and security risks
+## 6. DevSecOps pipeline
 
-1. Intentionally vulnerable application: should never be exposed to the Internet.
-2. Hardcoded demonstration credentials and host-published ports.
-3. Separate Compose networks need integration.
-4. Nginx config needs syntax and proxy-header validation.
-5. No confirmed end-to-end test suite or validated dashboards.
-6. Detection rules and SIEM correlation workflows are not included to the same level as the larger [SOC-LAB](https://github.com/gaddah-yousef/SOC-LAB) project.
+The [GitHub Actions workflow](.github/workflows/security-pipeline.yml) performs a Gitleaks secret check, Semgrep SAST, Docker image build, Nginx syntax smoke test and Trivy HIGH/CRITICAL vulnerability scan.
 
-## Roadmap
+The pipeline is a **quality and security gate for code/images**, not a replacement for runtime threat detection. CI success must be verified through GitHub Actions before making portfolio claims.
 
-- [ ] Repair Nginx configuration and add a container-level config test.
-- [ ] Unify networking/volumes in a safe Compose deployment.
-- [ ] Bind all local interfaces to `127.0.0.1`; rotate lab credentials.
-- [ ] Add reproducible benign HTTP test events and LogQL queries.
-- [ ] Create screenshots and evidence from verified test runs.
-- [ ] Stabilize CI jobs with pinned maintained actions.
-- [ ] Expand postmortems into structured detection and response playbooks.
+## 7. Demonstration as a SOC analyst
 
-## Skills and positioning
+1. Identify which benign login requests appear in Nginx access logs.
+2. Use Grafana to filter by timestamp, HTTP status or URL path.
+3. Compare traffic patterns with the case described in [the example postmortem](docs/postmortem-01.md).
+4. Document **observed evidence** separately from assumptions.
+5. Recommend practical hardening measures (rate limiting, MFA for real systems, least-privilege access).
 
-**Application Security · Docker · Nginx · Loki · Promtail · Grafana · DevSecOps · Incident Investigation · CI security automation.**
+**Note:** the sample postmortem is an academic narrative and should not be treated as proof of an independently verified real-world incident.
 
-**Author:** [Yousef Gaddah](https://github.com/gaddah-yousef) · Authorized training environment only.
+## 8. Next validation milestones
+
+- Run the full stack with pinned container images and capture screenshots of successful log ingestion.
+- Add automated integration tests checking HTTP responses and Loki query results.
+- Formalize detection thresholds, false-positive analysis and evidence retention.
+- Validate cross-platform Docker behavior (Linux/WSL2).
+- Add a downloadable example case report with sanitized synthetic logs.
+
+**Author:** [Yousef Gaddah](https://github.com/gaddah-yousef) — authorized security research and technical portfolio.
