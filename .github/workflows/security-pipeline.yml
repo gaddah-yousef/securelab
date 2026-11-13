@@ -39,6 +39,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Validate isolated Compose topology
+        run: docker compose --env-file .env.example -f compose.yaml config --quiet
       - name: Build verified Nginx image
         run: docker build -t securelab-proxy:ci ./app
       - name: Nginx configuration smoke test
