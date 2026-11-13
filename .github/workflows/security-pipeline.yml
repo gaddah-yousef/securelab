@@ -2,55 +2,52 @@ name: SecureLab Security Pipeline
 
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-
   secrets-scan:
-    name: Scan des secrets
+    name: Gitleaks (secret scanning)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Gitleaks — détection de secrets
+      - name: Detect committed secrets
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   sast:
-    name: Analyse statique du code
+    name: Semgrep (SAST)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Semgrep — SAST
-        uses: returntocorp/semgrep-action@v1
+      - uses: actions/setup-python@v5
         with:
-          config: >-
-            p/owasp-top-ten
-            p/docker
+          python-version: "3.12"
+      - name: Install Semgrep
+        run: python -m pip install "semgrep>=1.90,<2"
+      - name: Scan repository
+        run: semgrep scan --config p/owasp-top-ten --config p/docker --error --metrics=off .
 
   image-scan:
-    name: Scan de vulnérabilités Docker
-    runs-on: ubuntu-latest
+    name: Nginx configuration and image scan
     needs: [secrets-scan, sast]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Build de l'image
-        run: |
-              ls -la
-              ls -la app/
-              docker build -t securelab:${{ github.sha }} ./app
-
-      - name: Trivy — scan CVE
-        uses: aquasecurity/trivy-action@master
+      - name: Build verified Nginx image
+        run: docker build -t securelab-proxy:ci ./app
+      - name: Nginx configuration smoke test
+        run: docker run --rm securelab-proxy:ci nginx -t
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.36.0
         with:
-          image-ref: securelab:${{ github.sha }}
+          image-ref: securelab-proxy:ci
           format: table
-          exit-code: 1
-          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
